@@ -1,0 +1,14 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { searchSpaces, spaces, validateSpaces, isOpen, campusHour } from '../lib/spaces.ts';
+const run=(q:string)=>searchSpaces(new URLSearchParams(q),new Date('2026-11-15T18:00:00Z'));
+test('all seed records validate',()=>{assert.doesNotThrow(validateSpaces);assert.equal(new Set(spaces.map(s=>s.id)).size,spaces.length)});
+test('activity is a hard boundary for matches and alternatives',()=>{const r=run('activity=calls&noise=quiet');assert.equal(r.matches.length,0);assert.ok(r.alternatives.length>1);assert.ok(r.alternatives.every(s=>s.activities.includes('calls')&&s.noise!=='quiet'))});
+test('combined requirements only return exact matches',()=>{const r=run('activity=group&people=6&amenities=outlets,monitor&access=students&area=North+Campus');assert.ok(r.matches.length);assert.ok(r.matches.every(s=>s.groupSize>=6&&s.amenities.includes('monitor')&&s.amenities.includes('outlets')&&s.area==='North Campus'&&s.access==='students'));assert.ok(r.alternatives.every(s=>s.missed.length>0))});
+test('location search is case insensitive and never relaxed',()=>{const r=run('q=UNIVERSITY&activity=group');assert.ok(r.matches.length);assert.ok([...r.matches,...r.alternatives].every(s=>s.building==='University Library'));assert.equal(run('q=not-a-building').matches.length,0);assert.equal(run('q=not-a-building').alternatives.length,0)});
+test('missing amenity produces explicit alternative explanation',()=>{const r=run('activity=focus&amenities=monitor');assert.equal(r.matches.length,0);assert.ok(r.alternatives.every(s=>s.missed.some(m=>m.label==='No monitor / display')))});
+test('invalid queries are rejected',()=>{for(const q of ['people=-1','people=1.5','people=101','people=no','activity=party','noise=loud','amenities=unknown','sort=random'])assert.throws(()=>run(q))});
+test('stable results and sorting',()=>{assert.deepEqual(run('activity=group'),run('activity=group'));const m=run('sort=seats').matches;assert.ok(m.every((s,i)=>!i||m[i-1].available>=s.available))});
+test('Central time and opening boundaries',()=>{assert.equal(campusHour(new Date('2026-11-15T18:00:00Z')),12);const s=spaces.find(s=>s.id==='vocal-booth')!;assert.equal(isOpen(s,9),true);assert.equal(isOpen(s,20),false);assert.equal(isOpen(spaces[0],23),true)});
+test('no reservation restriction is respected',()=>{assert.ok(run('access=walkin').matches.every(s=>!s.reservation))});
+test('oversized groups have no exact matches',()=>{const r=run('people=100');assert.equal(r.matches.length,0);assert.ok(r.alternatives.every(s=>s.missed.some(m=>m.key==='people')))});
